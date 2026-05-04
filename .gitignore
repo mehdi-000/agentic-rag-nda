@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.env
+.env.*
+
+# Qdrant embedded storage
+nda_rag/index/
+
+# Parent chunk store
+nda_rag/parents.json
+
+# Parse status
+nda_rag/parse_status.json
+
+# NDA documents (confidential)
+nda_rag/docs/
+
+# Gradio cache
+gradio_cached_examples/
+*.gradio/
+
+# macOS
+.DS_Store
+
+# JetBrains / VSCode
+.idea/
+.vscode/
+*.iml
+
+# Docker volumes
+ollama_data/
+qdrant_data/
