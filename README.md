@@ -45,33 +45,31 @@ Built for the [Kleister NDA](https://github.com/applicaai/kleister-nda) dataset 
 
 ## Architecture
 
-### Ingestion
+**Ingestion**
 
 ```mermaid
-flowchart TD
-    PDFs["PDFs in docs/"] --> Parse["PyMuPDF\nblock extraction"]
-    Parse --> Filter["Section detection\nHeader/footer filtering"]
-    Filter --> Parents["Parent chunks\n~800 chars · 150-char overlap"]
-    Filter --> Children["Child chunks\n~300 chars · 75-char overlap"]
-    Parents --> Store["parents.json"]
-    Children --> Prefix["Context prefix added"]
-    Prefix --> Embed["nomic-embed-text"]
-    Embed --> Index["Qdrant index\ndense + BM25 sparse"]
+flowchart LR
+    PDFs["docs/"] --> Parse["PyMuPDF"]
+    Parse --> Filter["Section + footer filter"]
+    Filter --> P["Parent ~800c"]
+    Filter --> C["Child ~300c"]
+    P --> Store["parents.json"]
+    C --> Embed["nomic-embed-text"]
+    Embed --> Index["Qdrant\ndense + BM25"]
 ```
 
-### Query flow
+**Query flow**
 
 ```mermaid
-flowchart TD
-    Q["User question"] --> S["sanitize_input()"]
-    S --> R["rewrite_query()\nqwen2.5:3b"]
-    R --> H["Hybrid retrieval\nQdrant dense + BM25"]
-    H --> G["grade_evidence()\nqwen2.5:3b"]
-    G -->|sufficient| A["stream_answer()\nqwen2.5:7b"]
+flowchart LR
+    Q["Question"] --> S["sanitize"]
+    S --> R["rewrite\n3b"]
+    R --> H["Hybrid\nretrieval"]
+    H --> G["grade\n3b"]
+    G -->|sufficient| A["answer\n7b"]
     G -->|retry| R
-    G -->|give_up| Low["Low-confidence answer\nqwen2.5:7b"]
+    G -->|give_up| A
     A --> Out["Gradio / JSON"]
-    Low --> Out
 ```
 
 ---
