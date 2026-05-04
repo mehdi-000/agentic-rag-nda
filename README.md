@@ -4,6 +4,10 @@ Local NDA question-answering. PDFs in, cited answers out, nothing leaves the mac
 
 Built for the [Kleister NDA](https://github.com/applicaai/kleister-nda) dataset as a take-home coding challenge for an Agentic Coding Developer role.
 
+**Tracked effort:**
+
+[![Time tracker screenshot: Total 7h 14m](assets/tracked-time.png)](assets/tracked-time.png)
+
 ---
 
 ## Contents
@@ -27,19 +31,19 @@ Built for the [Kleister NDA](https://github.com/applicaai/kleister-nda) dataset 
 
 **What it does**
 
-* Answers questions over NDA PDFs
-* Cites document, page, chunk, and snippet for every claim
-* Labels each piece of evidence as `direct`, `inferred`, or `absent`
-* Retries with a targeted query when the first retrieval is weak
-* Streams the answer token by token so the UI feels responsive
-* Shows the full reasoning trace in a Gradio dashboard
+- Answers questions over NDA PDFs
+- Cites document, page, chunk, and snippet for every claim
+- Labels each piece of evidence as `direct`, `inferred`, or `absent`
+- Retries with a targeted query when the first retrieval is weak
+- Streams the answer token by token so the UI feels responsive
+- Shows the full reasoning trace in a Gradio dashboard
 
 **What it avoids**
 
-* No external LLM APIs
-* No telemetry or cloud services
-* No confident answers when evidence is missing
-* No data leaving the machine
+- No external LLM APIs
+- No telemetry or cloud services
+- No confident answers when evidence is missing
+- No data leaving the machine
 
 ---
 
@@ -76,15 +80,15 @@ flowchart LR
 
 ## Stack
 
-| Component | Choice | Role |
-|---|---|---|
-| LLM | qwen2.5:7b-instruct (Ollama) | Final answer generation |
-| Fast model | qwen2.5:3b (Ollama) | Rewrite, grade, classify |
-| Embeddings | nomic-embed-text (Ollama) | 768-dim, local |
-| Vector DB | Qdrant | Dense + sparse search |
-| PDF parsing | PyMuPDF | Block-level, keeps page metadata |
-| UI | Gradio | 3-tab debug dashboard |
-| Runtime | Python 3.11 + Docker Compose | |
+| Component   | Choice                       | Role                             |
+| ----------- | ---------------------------- | -------------------------------- |
+| LLM         | qwen2.5:7b-instruct (Ollama) | Final answer generation          |
+| Fast model  | qwen2.5:3b (Ollama)          | Rewrite, grade, classify         |
+| Embeddings  | nomic-embed-text (Ollama)    | 768-dim, local                   |
+| Vector DB   | Qdrant                       | Dense + sparse search            |
+| PDF parsing | PyMuPDF                      | Block-level, keeps page metadata |
+| UI          | Gradio                       | 3-tab debug dashboard            |
+| Runtime     | Python 3.11 + Docker Compose |                                  |
 
 ---
 
@@ -136,10 +140,10 @@ Open [http://localhost:7860](http://localhost:7860).
 
 **Ingestion modes** (`config.py`):
 
-| Setting | Speed | Quality |
-|---|---|---|
-| `CONTEXTUAL_ENRICHMENT = False` | Fast, no LLM calls | Good (deterministic prefix) |
-| `CONTEXTUAL_ENRICHMENT = True` | Slow, ~1-2s per chunk | Better (LLM-written context) |
+| Setting                         | Speed                 | Quality                      |
+| ------------------------------- | --------------------- | ---------------------------- |
+| `CONTEXTUAL_ENRICHMENT = False` | Fast, no LLM calls    | Good (deterministic prefix)  |
+| `CONTEXTUAL_ENRICHMENT = True`  | Slow, ~1-2s per chunk | Better (LLM-written context) |
 
 ---
 
@@ -178,10 +182,10 @@ flowchart LR
     Parent --> JSON["Store → parents.json"]
 ```
 
-* Small child chunks keep search precise
-* Large parent chunks give the LLM enough context to answer
-* Page numbers stay attached so citations are exact
-* Sliding window overlap prevents clauses from splitting at chunk edges
+- Small child chunks keep search precise
+- Large parent chunks give the LLM enough context to answer
+- Page numbers stay attached so citations are exact
+- Sliding window overlap prevents clauses from splitting at chunk edges
 
 ---
 
@@ -234,10 +238,10 @@ On `retry`, `missing_aspects` feeds into the next query rewrite. The second sear
 }
 ```
 
-* `confidence` shows how well-supported the answer is
-* `evidence` shows exactly where the answer came from
-* `support` separates direct quotes from inferences from missing information
-* `self_correction` shows whether a retry was needed and why
+- `confidence` shows how well-supported the answer is
+- `evidence` shows exactly where the answer came from
+- `support` separates direct quotes from inferences from missing information
+- `self_correction` shows whether a retry was needed and why
 
 ---
 
@@ -280,10 +284,10 @@ flowchart LR
     L --> A["Answer grounded\nin retrieved text only"]
 ```
 
-* `sanitize_input()` strips known injection patterns before any prompt is built
-* User text is wrapped in XML delimiters so it cannot escape its boundary
-* The model is instructed to refuse queries outside NDA analysis
-* All services are local by default
+- `sanitize_input()` strips known injection patterns before any prompt is built
+- User text is wrapped in XML delimiters so it cannot escape its boundary
+- The model is instructed to refuse queries outside NDA analysis
+- All services are local by default
 
 ---
 
@@ -307,15 +311,15 @@ What stayed: parent/child chunking, LangGraph orchestration, agent retry loop.
 
 What changed:
 
-| agentic-rag-for-dummies | this project |
-|---|---|
-| PDF → Markdown | PyMuPDF block extraction, page metadata kept |
-| Markdown header-based parents | Font-size section detection + sliding window |
-| Conversation memory | Removed — single-turn |
-| Human-in-the-loop clarification | Removed — adds latency, not needed |
-| Multi-agent map-reduce | Removed — overkill for focused NDA questions |
-| Context compression loops | Removed — no benefit at this scale |
-| Cloud LLM optional | Local-only, no exceptions |
+| agentic-rag-for-dummies         | this project                                 |
+| ------------------------------- | -------------------------------------------- |
+| PDF → Markdown                  | PyMuPDF block extraction, page metadata kept |
+| Markdown header-based parents   | Font-size section detection + sliding window |
+| Conversation memory             | Removed — single-turn                        |
+| Human-in-the-loop clarification | Removed — adds latency, not needed           |
+| Multi-agent map-reduce          | Removed — overkill for focused NDA questions |
+| Context compression loops       | Removed — no benefit at this scale           |
+| Cloud LLM optional              | Local-only, no exceptions                    |
 
 </details>
 
