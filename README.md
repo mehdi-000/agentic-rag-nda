@@ -45,6 +45,10 @@ Built for the [Kleister NDA](https://github.com/applicaai/kleister-nda) dataset 
 - No confident answers when evidence is missing
 - No data leaving the machine
 
+**Dashboard demo** — New Improved Performance! Fast, streaming answers with Markdown rendering, live citations, and full reasoning trace:
+
+![Demo: question answered in seconds with streaming Markdown, evidence, and self-correction trace](assets/gradio-dashboard-demo.gif)
+
 ---
 
 ## Architecture
@@ -268,13 +272,13 @@ For each question, the diagnostic traces where a failure happened:
 
 ### Metrics
 
-| Metric | How it works |
-| --- | --- |
-| **F1** | Fuzzy token-level match with duration equivalence (`24_months` = `2_years`) |
-| **Hit Rate** | Did the retrieved context contain the expected value? |
-| **Faithfulness** | LLM-scored: is the answer grounded in the retrieved context? |
-| **Relevancy** | LLM-scored: does the answer address the question? |
-| **Judge** | Pairwise blind comparison: RAG answer vs. reference, randomised order |
+| Metric           | How it works                                                                |
+| ---------------- | --------------------------------------------------------------------------- |
+| **F1**           | Fuzzy token-level match with duration equivalence (`24_months` = `2_years`) |
+| **Hit Rate**     | Did the retrieved context contain the expected value?                       |
+| **Faithfulness** | LLM-scored: is the answer grounded in the retrieved context?                |
+| **Relevancy**    | LLM-scored: does the answer address the question?                           |
+| **Judge**        | Pairwise blind comparison: RAG answer vs. reference, randomised order       |
 
 ### Scores (30 documents, 94 questions)
 

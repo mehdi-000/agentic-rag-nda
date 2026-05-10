@@ -198,7 +198,8 @@ def build_app() -> gr.Blocks:
                     )
                     btn_ask = gr.Button("Ask", variant="primary", scale=1, min_width=100)
 
-                answer_box = gr.Textbox(label="Answer", lines=5, interactive=False)
+                gr.Markdown("**Answer**")
+                answer_box = gr.Markdown()
 
                 with gr.Accordion("Evidence", open=False):
                     evidence_box = gr.Markdown()
