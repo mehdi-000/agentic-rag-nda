@@ -148,7 +148,11 @@ def run_query(query: str):
         answer_text += token
         yield answer_text, "", rows, correction_md, ""
 
+    yield answer_text, "_Classifying evidence…_", rows, correction_md, ""
     confidence, evidence = classify_evidence(state, answer_text)
+
+    conf_banner = {"high": "", "medium": "\n\n---\n_Confidence: medium — some details may be inferred._", "low": "\n\n---\n**Warning: low confidence — this answer may not be fully supported by the retrieved documents.**"}
+    display_answer = answer_text + conf_banner.get(confidence, conf_banner["low"])
 
     final = {
         "answer": answer_text,
@@ -158,7 +162,7 @@ def run_query(query: str):
         "_debug": {"chunks": state["chunks"]},
     }
     yield (
-        answer_text,
+        display_answer,
         _render_evidence(evidence),
         rows,
         correction_md,

@@ -111,7 +111,6 @@ def _extract_structured_blocks(doc_id: str, pages: list[dict]) -> list[dict]:
 
             if max_size >= heading_threshold or (is_bold and len(text) < 120):
                 current_section = text[:80]
-                continue
 
             blocks_out.append({
                 "doc_id": doc_id,

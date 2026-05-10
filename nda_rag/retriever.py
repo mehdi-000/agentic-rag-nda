@@ -7,6 +7,8 @@ from langchain_qdrant import QdrantVectorStore
 from langchain_qdrant.fastembed_sparse import FastEmbedSparse
 from langchain_qdrant.qdrant import RetrievalMode
 
+from qdrant_client.http import models as qmodels
+
 from config import (
     PARENTS_DIR, OLLAMA_HOST,
     EMBED_MODEL, CHILD_COLLECTION, TOP_K, SCORE_THRESHOLD,
@@ -35,8 +37,13 @@ def invalidate_store() -> None:
     _store = None
 
 
-def search_chunks(query: str, k: int = TOP_K) -> list[dict[str, Any]]:
-    results = _vector_store().similarity_search_with_score(query, k=k, score_threshold=SCORE_THRESHOLD)
+def search_chunks(query: str, k: int = TOP_K, doc_id: str | None = None) -> list[dict[str, Any]]:
+    kwargs: dict[str, Any] = {"k": k, "score_threshold": SCORE_THRESHOLD}
+    if doc_id:
+        kwargs["filter"] = qmodels.Filter(
+            must=[qmodels.FieldCondition(key="metadata.doc_id", match=qmodels.MatchValue(value=doc_id))]
+        )
+    results = _vector_store().similarity_search_with_score(query, **kwargs)
     return [
         {
             "chunk_id": doc.metadata.get("chunk_id", ""),

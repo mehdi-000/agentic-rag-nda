@@ -1,12 +1,4 @@
 services:
-  ollama:
-    image: ollama/ollama
-    volumes:
-      - ollama_data:/root/.ollama
-    ports:
-      - "11434:11434"
-    restart: unless-stopped
-
   qdrant:
     image: qdrant/qdrant
     volumes:
@@ -20,19 +12,18 @@ services:
       context: ./nda_rag
     volumes:
       - ./nda_rag/docs:/app/docs
-      - ./nda_rag/index:/app/index
+      - ./nda_rag/index/parents:/app/index/parents
     ports:
       - "7860:7860"
     environment:
-      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_HOST: http://host.docker.internal:11434
       QDRANT_URL: http://qdrant:6333
-      LLM_MODEL: qwen2.5:3b
+      LLM_MODEL: qwen2.5:7b-instruct
       FAST_MODEL: qwen2.5:3b
+      EMBED_MODEL: nomic-embed-text
     depends_on:
-      - ollama
       - qdrant
     restart: unless-stopped
 
 volumes:
-  ollama_data:
   qdrant_data:

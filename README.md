@@ -55,7 +55,7 @@ Built for the [Kleister NDA](https://github.com/applicaai/kleister-nda) dataset 
 flowchart LR
     PDFs["docs/"] --> Parse["PyMuPDF"]
     Parse --> Filter["Section + footer filter"]
-    Filter --> P["Parent ~800c"]
+    Filter --> P["Parent ~1200c"]
     Filter --> C["Child ~300c"]
     P --> Store["parents.json"]
     C --> Embed["nomic-embed-text"]
@@ -149,21 +149,23 @@ Open [http://localhost:7860](http://localhost:7860).
 
 ## Docker
 
-Three services, one command:
+Two containers (app + Qdrant), Ollama runs natively for GPU acceleration:
 
 ```bash
+# 1. Start Ollama natively
+ollama serve
+
+# 2. Start app + Qdrant
 docker-compose up
 ```
 
-After startup, pull models and index:
+After startup, index the documents:
 
 ```bash
-docker exec -it <ollama-id> ollama pull qwen2.5:3b
-docker exec -it <ollama-id> ollama pull nomic-embed-text
 docker exec -it <app-id> python3 ingest.py
 ```
 
-> Docker defaults to `qwen2.5:3b` for both LLM roles. See [Why is Docker inference slow on Mac?](#why-is-docker-inference-slow-on-mac) in the FAQ.
+> Ollama runs outside Docker so it can use Apple Silicon / GPU acceleration. The app container connects to it via `host.docker.internal`. See [Why is Docker inference slow on Mac?](#why-is-docker-inference-slow-on-mac) in the FAQ.
 
 ---
 
@@ -172,9 +174,9 @@ docker exec -it <app-id> python3 ingest.py
 ```mermaid
 flowchart LR
     Block["PDF text block\n+ page number\n+ font size"] --> Heading{"Heading?"}
-    Heading -->|"yes"| Section["New section boundary"]
+    Heading -->|"yes"| SectionAndKeep["New section boundary\n+ keep text in index"]
     Heading -->|"no"| Body["Body text"]
-    Section --> Parent["Parent chunk\n~800 chars"]
+    SectionAndKeep --> Parent["Parent chunk\n~1200 chars"]
     Body --> Parent
     Parent --> Child["Child chunks\n~300 chars\nsliding window"]
     Child --> Ctx["Context prefix\n[doc | page | section]"]
@@ -183,7 +185,8 @@ flowchart LR
 ```
 
 - Small child chunks keep search precise
-- Large parent chunks give the LLM enough context to answer
+- Large parent chunks (1200 chars) give the LLM enough context to answer
+- Heading text is kept in the index, party names and dates often appear in bold/large text
 - Page numbers stay attached so citations are exact
 - Sliding window overlap prevents clauses from splitting at chunk edges
 
@@ -191,7 +194,7 @@ flowchart LR
 
 ## Self-Correction
 
-Up to three attempts per question (`MAX_RETRIES` in `config.py`).
+Up to two attempts per question (`MAX_RETRIES` in `config.py`). The first attempt uses the original query directly. Rewriting only kicks in on retry, saving an LLM call on the happy path.
 
 After each retrieval the grader returns:
 
@@ -248,10 +251,55 @@ On `retry`, `missing_aspects` feeds into the next query rewrite. The second sear
 ## Evaluation
 
 ```bash
-python3 evaluate.py --dataset /path/to/kleister-nda --split dev-0 --limit 20
+python3 evaluate.py --dataset /path/to/kleister-nda --split dev-0 --limit 10
 ```
 
-Computes F1 for `effective_date`, `jurisdiction`, `party`, and `term` plus an overall score. Use `--reset` for a clean index before a run.
+### What it measures
+
+The evaluation script runs a **3-layer diagnostic** against the [Kleister NDA](https://github.com/applicaai/kleister-nda) benchmark. Real NDA PDFs with human-annotated ground truth for `effective_date`, `jurisdiction`, `party`, and `term`.
+
+For each question, the diagnostic traces where a failure happened:
+
+1. **INGESTION**: the expected value is not in the indexed chunks. PDF parsing or chunking lost it.
+2. **RETRIEVAL**: the value is in the index but the search did not surface it in the top-K results.
+3. **GENERATION**: retrieval found the right chunks but the LLM produced the wrong answer.
+4. **HALLUCINATION**: the answer has low faithfulness to the retrieved context.
+5. **OK**: everything worked.
+
+### Metrics
+
+| Metric | How it works |
+| --- | --- |
+| **F1** | Fuzzy token-level match with duration equivalence (`24_months` = `2_years`) |
+| **Hit Rate** | Did the retrieved context contain the expected value? |
+| **Faithfulness** | LLM-scored: is the answer grounded in the retrieved context? |
+| **Relevancy** | LLM-scored: does the answer address the question? |
+| **Judge** | Pairwise blind comparison: RAG answer vs. reference, randomised order |
+
+### Scores (10 documents, 32 questions)
+
+```
+Field                  F1   HitR  Faith  Relev        Judge    N
+----------------------------------------------------------------------------
+effective_date      0.667  0.000  0.980  0.980 6/         9    9
+jurisdiction        0.889  1.000  0.875  1.000 6/         9    9
+party               0.713  0.900  0.800  0.386 5/        10   10
+term                0.000  0.500  1.000  0.950 1/         4    4
+----------------------------------------------------------------------------
+Overall             0.660
+
+Diagnosis: INGESTION 9, OK 12, GENERATION 7, RETRIEVAL 3, HALLUCINATION 1
+```
+
+Jurisdiction is the strongest field (F1 0.89, 100% retrieval hit rate). Party extraction works well when the names appear as expected in the document (F1 0.71). Term extraction is the weakest. The system finds the relevant clause but does not consistently parse the duration from it.
+
+### Judge
+
+Pairwise blind comparison: RAG answer and reference are placed in random order, a separate model picks the better one or calls a tie. Set `OPENROUTER_API_KEY` to use an external judge. Without it, the local 3B model is used as fallback.
+
+### Production evaluation
+
+These scores come from the public Kleister NDA benchmark, documents the system has never seen. In production you would evaluate against curated question-answer pairs from the actual deployed documents, reviewed by a domain expert, with a stronger or calibrated judge model.
 
 ---
 
@@ -305,7 +353,7 @@ flowchart LR
 <details>
 <summary>What was the starting inspiration?</summary>
 
-[agentic-rag-for-dummies](https://github.com/GiovanniPasq/agentic-rag-for-dummies) — clean LangGraph pipeline with hierarchical indexing and a self-correction loop.
+[agentic-rag-for-dummies](https://github.com/GiovanniPasq/agentic-rag-for-dummies), a clean LangGraph pipeline with hierarchical indexing and a self-correction loop.
 
 What stayed: parent/child chunking, LangGraph orchestration, agent retry loop.
 
@@ -315,10 +363,10 @@ What changed:
 | ------------------------------- | -------------------------------------------- |
 | PDF → Markdown                  | PyMuPDF block extraction, page metadata kept |
 | Markdown header-based parents   | Font-size section detection + sliding window |
-| Conversation memory             | Removed — single-turn                        |
-| Human-in-the-loop clarification | Removed — adds latency, not needed           |
-| Multi-agent map-reduce          | Removed — overkill for focused NDA questions |
-| Context compression loops       | Removed — no benefit at this scale           |
+| Conversation memory             | Removed, single-turn                         |
+| Human-in-the-loop clarification | Removed, adds latency, not needed            |
+| Multi-agent map-reduce          | Removed, overkill for focused NDA questions  |
+| Context compression loops       | Removed, no benefit at this scale            |
 | Cloud LLM optional              | Local-only, no exceptions                    |
 
 </details>
@@ -326,7 +374,7 @@ What changed:
 <details>
 <summary>Why PyMuPDF instead of converting PDFs to Markdown?</summary>
 
-- The challenge requires page numbers in every citation — Markdown conversion loses them
+- The challenge requires page numbers in every citation. Markdown conversion loses them
 - Kleister NDA PDFs are generated from HTML via Puppeteer, so font sizes are consistent and section detection from font metadata is reliable
 - Block-level extraction keeps the document structure intact for hierarchical chunking
 
@@ -338,19 +386,20 @@ What changed:
 Bad chunking breaks retrieval in ways prompt engineering cannot fix.
 
 - Parent/child split: small chunks for search precision, large chunks for answer context
-- Sliding window overlap (75-char child, 150-char parent): clause boundaries do not land at chunk edges
-- Header/footer filtering: repeated short blocks stripped before indexing
+- Sliding window overlap (75-char child, 200-char parent): clause boundaries do not land at chunk edges
+- Header/footer filtering: repeated short blocks stripped before indexing, but heading text is kept because party names and dates often appear in bold/large text
 - Context prefix on every child chunk before embedding: improves retrieval for small local models
+- Minimum block threshold lowered to 15 chars to catch short but information-dense lines like dates and jurisdiction names
 
 </details>
 
 <details>
 <summary>What was deliberately skipped?</summary>
 
-- **Conversation memory** — NDA analysis is single-turn; prior questions do not help retrieve the next passage
-- **Human-in-the-loop clarification** — adds latency with no retrieval benefit
-- **Multi-agent map-reduce** — useful for decomposing complex questions across many documents, not needed here
-- **Context compression loops** — no measurable benefit at 83 documents and three retry attempts
+- **Conversation memory**: NDA analysis is single-turn, prior questions do not help retrieve the next passage
+- **Human-in-the-loop clarification**: adds latency with no retrieval benefit
+- **Multi-agent map-reduce**: useful for decomposing complex questions across many documents, not needed here
+- **Context compression loops**: no measurable benefit at 83 documents and three retry attempts
 
 </details>
 
@@ -406,7 +455,25 @@ environment:
 
 **On a GPU server:** switch to `qwen2.5:7b-instruct` for better answer quality.
 
-Environment variables the app reads: `OLLAMA_HOST`, `QDRANT_URL`, `LLM_MODEL`, `FAST_MODEL`, `EMBED_MODEL`. Without `QDRANT_URL` it falls back to embedded Qdrant in `index/qdrant/`.
+Environment variables the app reads: `OLLAMA_HOST`, `QDRANT_URL`, `LLM_MODEL`, `FAST_MODEL`, `EMBED_MODEL`. Without `QDRANT_URL` it falls back to embedded Qdrant in `index/qdrant/`. For evaluation, `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` configure the external judge.
+
+</details>
+
+<details>
+<summary>Why a 3-layer evaluation instead of just F1?</summary>
+
+A single F1 score tells you the system is wrong, not why. The 3-layer diagnostic separates ingestion failures (data lost during PDF parsing) from retrieval failures (data in the index but not found) from generation failures (right context, wrong answer). The fix is completely different for each layer. Improving prompts does not help if the data was never indexed.
+
+The evaluation also uses a pairwise LLM judge because strict string matching is too harsh for NDA fields. `"Commonwealth of Massachusetts"` is correct for `"Massachusetts"`, `"Anadigics, Inc"` is correct for `"Anadigics_Inc."`. Fuzzy token-level matching helps, but a judge model catches semantic equivalences that no regex can.
+
+</details>
+
+<details>
+<summary>Why not use the same LLM for generation and evaluation?</summary>
+
+Self-judging bias. The same model that generated the answer tends to rate its own output favourably. In our tests the local 3B judge called nearly every answer a tie, including answers with fabricated dates. Switching to a separate external model via OpenRouter produced stricter, more accurate verdicts.
+
+In production you would use a stronger model for evaluation, or better yet, curated test data with human-verified answers from the actual deployed documents. The public benchmark scores here are a lower bound.
 
 </details>
 
@@ -414,7 +481,7 @@ Environment variables the app reads: `OLLAMA_HOST`, `QDRANT_URL`, `LLM_MODEL`, `
 <summary>What were the real challenges during development?</summary>
 
 **Contextual enrichment was too slow.**
-One LLM call per child chunk across 83 PDFs = several hours of indexing. Fix: config toggle. Fast mode uses a deterministic `[doc | page | section]` prefix — no LLM calls, ~80% of the retrieval benefit.
+One LLM call per child chunk across 83 PDFs = several hours of indexing. Fix: config toggle. Fast mode uses a deterministic `[doc | page | section]` prefix with no LLM calls, ~80% of the retrieval benefit.
 
 **Qdrant embedded mode has a file lock.**
 Dashboard and a running ingestion process cannot share the same on-disk Qdrant folder. One crashes with a lock error. Fix: Qdrant server mode in Docker (separate container), with embedded mode kept as a fallback for local dev without Docker. Required adding a shared `qdrant_store.py` used by both `ingest.py` and `retriever.py`.
@@ -428,15 +495,23 @@ First version had two tabs requiring the same query to be entered twice to see t
 **Perceived latency was the main UX problem.**
 Three LLM calls before anything appears: rewrite, grade, answer. On local hardware that was 60 seconds of blank screen. Fix: run rewrite and grade with the fast 3B model first, then stream the final answer token by token from 7B. The user sees retrieved chunks after a few seconds, then the answer fills in live.
 
+**Cross-document contamination silently broke retrieval.**
+With 83 documents indexed, a question about one NDA would retrieve chunks from a different, more prominent NDA. The evaluation originally flagged these as ingestion failures because the expected value "wasn't found", but it was never searched in the right place. Fix: document-scoped retrieval via Qdrant metadata filter. This alone flipped several false ingestion diagnoses to OK.
+
+**The 7B model fabricated dates when it could not find the real one.**
+Instead of saying "not found", `qwen2.5:7b` would generate a plausible-looking recent date like `2023-10-01`. The answer prompt said "never invent facts" but the model ignored this when the question demanded a specific format. Fix: added an explicit `NOT_FOUND` escape to the prompt, plus post-validation that checks whether extracted dates and names actually appear in the retrieved context. Answers that fail the grounding check are flagged as low confidence.
+
 </details>
 
 <details>
 <summary>How did the codebase develop?</summary>
 
-**Iteration 1** — Initial build: full pipeline, ingestion, retrieval, grading, self-correction, Gradio dashboard, evaluation script.
+**Iteration 1** | Initial build: full pipeline, ingestion, retrieval, grading, self-correction, Gradio dashboard, evaluation script.
 
-**Iteration 2** — Code review pass: Qdrant server mode to fix the file lock, Docker Compose with three containers, model size split (3B default in Docker / 7B locally), deployment performance notes.
+**Iteration 2** | Code review pass: Qdrant server mode, Docker Compose, model size split (3B in Docker / 7B locally).
 
-**Iteration 3** — UX pass: streaming answer generation, merged Q&A and trace tabs, README rewrite.
+**Iteration 3** | UX pass: streaming answers, merged Q&A and trace tabs, README rewrite.
+
+**Iteration 4** | Evaluation and accuracy pass: 3-layer diagnostic (ingestion → retrieval → generation), pairwise LLM judge, faithfulness/relevancy scoring, fuzzy token-level F1 with duration equivalence. Document-scoped retrieval to fix cross-document contamination. Heading text retained in index. Parent chunks 800→1200 chars. `NOT_FOUND` escape and post-validation to reduce hallucinations. F1 0.10→0.66.
 
 </details>

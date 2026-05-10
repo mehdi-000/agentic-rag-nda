@@ -46,6 +46,7 @@ class CorrectionStep(TypedDict):
 class AgentState(TypedDict):
     original_query: str
     current_query: str
+    doc_id: str | None
     attempt: int
     chunks: list[dict]
     parents: list[dict]
@@ -54,6 +55,7 @@ class AgentState(TypedDict):
     confidence: str
     evidence: list[dict]
     self_correction: list[CorrectionStep]
+    past_queries: set[str]
 
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -100,17 +102,22 @@ def _build_docs_text(state: AgentState) -> str:
 
 def _rewrite(state: AgentState) -> None:
     missing = state.get("grade", {}).get("missing_aspects", [])
-    retry_context = ", ".join(missing) if missing and state["attempt"] > 0 else ""
-    prompt = REWRITE_SYSTEM.format(
-        query=state["current_query"] if state["attempt"] == 0 else state["original_query"],
-        retry_context=retry_context,
-    )
+    retry_context = ", ".join(missing) if missing else ""
+    prompt = REWRITE_SYSTEM.format(query=state["original_query"], retry_context=retry_context)
     response = get_fast_llm().invoke([HumanMessage(content=prompt)])
-    state["current_query"] = response.content.strip().split("\n")[0]
+    new_query = response.content.strip().split("\n")[0]
+
+    if new_query in state["past_queries"]:
+        prompt += f"\n\nDo NOT repeat these queries: {', '.join(state['past_queries'])}. Write a substantially different query."
+        response = get_fast_llm().invoke([HumanMessage(content=prompt)])
+        new_query = response.content.strip().split("\n")[0]
+
+    state["past_queries"].add(new_query)
+    state["current_query"] = new_query
 
 
 def _retrieve(state: AgentState) -> None:
-    state["chunks"] = search_chunks(state["current_query"])
+    state["chunks"] = search_chunks(state["current_query"], doc_id=state.get("doc_id"))
     state["parents"] = fetch_parents_for_chunks(state["chunks"])
 
 
@@ -151,10 +158,11 @@ def _grade(state: AgentState) -> None:
     })
 
 
-def _initial_state(query: str) -> AgentState:
+def _initial_state(query: str, doc_id: str | None = None) -> AgentState:
     return {
         "original_query": query,
         "current_query": query,
+        "doc_id": doc_id,
         "attempt": 0,
         "chunks": [],
         "parents": [],
@@ -163,18 +171,19 @@ def _initial_state(query: str) -> AgentState:
         "confidence": "low",
         "evidence": [],
         "self_correction": [],
+        "past_queries": {query},
     }
 
 
-def run_pipeline_only(query: str) -> AgentState:
-    """Run rewrite -> retrieve -> grade (with retries). Returns state ready for answer generation."""
-    state = _initial_state(sanitize_input(query))
-    for _ in range(MAX_RETRIES + 1):
-        _rewrite(state)
+def run_pipeline_only(query: str, doc_id: str | None = None) -> AgentState:
+    """Retrieve -> grade, rewriting only on retry. Returns state ready for answer generation."""
+    state = _initial_state(sanitize_input(query), doc_id=doc_id)
+    for attempt in range(MAX_RETRIES + 1):
+        if attempt > 0:
+            _rewrite(state)
         _retrieve(state)
         _grade(state)
-        decision = state["grade"].get("decision", "give_up")
-        if decision in ("sufficient", "give_up"):
+        if state["grade"].get("decision", "give_up") in ("sufficient", "give_up"):
             break
         state["attempt"] += 1
     return state
@@ -211,9 +220,25 @@ def classify_evidence(state: AgentState, answer_text: str) -> tuple[str, list[di
         return "low", fallback
 
 
-def run(query: str) -> dict[str, Any]:
+def _ground_check(answer: str, context_text: str) -> bool:
+    """Check if key values in the answer (dates, names) appear in the context."""
+    if not answer or answer == "NOT_FOUND":
+        return True
+    ctx_upper = context_text.upper()
+    dates = re.findall(r"\d{4}-\d{2}-\d{2}", answer)
+    for d in dates:
+        parts = d.split("-")
+        if d not in context_text and not any(p in ctx_upper for p in [parts[0], f"{parts[1]}/{parts[2]}", f"{parts[2]}/{parts[1]}"]):
+            return False
+    tokens = {t.upper() for t in re.split(r"[\s,;.()]+", answer) if len(t) > 3}
+    if tokens and not any(t in ctx_upper for t in tokens):
+        return False
+    return True
+
+
+def run(query: str, doc_id: str | None = None) -> dict[str, Any]:
     """Blocking version — used by evaluate.py."""
-    state = run_pipeline_only(query)
+    state = run_pipeline_only(query, doc_id=doc_id)
 
     prompt = ANSWER_SYSTEM.format(query=state["original_query"], documents=_build_docs_text(state))
     response = get_llm().invoke([HumanMessage(content=prompt)])
@@ -226,6 +251,11 @@ def run(query: str) -> dict[str, Any]:
         confidence = "low"
         evidence = [{"document": c["doc_id"], "page": c["page_num"], "chunk_id": c["chunk_id"], "snippet": c["snippet"], "support": "inferred"} for c in state["chunks"][:3]]
 
+    if answer and answer != "NOT_FOUND":
+        ctx = " ".join(p.get("text", "") for p in state["parents"])
+        if not _ground_check(answer, ctx):
+            confidence = "low"
+
     return {
         "answer": answer,
         "confidence": confidence,
@@ -235,6 +265,7 @@ def run(query: str) -> dict[str, Any]:
             "original_query": state["original_query"],
             "final_query": state["current_query"],
             "chunks": state["chunks"],
+            "parents": state["parents"],
         },
     }
 
