@@ -45,7 +45,7 @@ Built for the [Kleister NDA](https://github.com/applicaai/kleister-nda) dataset 
 - No confident answers when evidence is missing
 - No data leaving the machine
 
-**Dashboard demo** — New Improved Performance! Fast, streaming answers with Markdown rendering, live citations, and full reasoning trace:
+**New Improved Performance!** Fast, streaming answers with Markdown rendering, live citations, and full reasoning trace:
 
 ![Demo: question answered in seconds with streaming Markdown, evidence, and self-correction trace](assets/gradio-dashboard-demo.gif)
 
