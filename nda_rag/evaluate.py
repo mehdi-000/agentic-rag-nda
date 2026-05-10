@@ -178,7 +178,7 @@ def _extract_values(answer: str, field: str) -> list[str]:
         lines = [l.strip(" -•*1234567890.)") for l in answer.splitlines() if l.strip()]
         return [l for l in lines if len(l) > 3][:6]
     if field == "term":
-        m = re.search(r"(\d+)\s*(year|month|week|day)s?", answer, re.IGNORECASE)
+        m = re.search(r"(\d+)[\s_]*(year|month|week|day)s?", answer, re.IGNORECASE)
         return [f"{m.group(1)}_{m.group(2).lower()}s"] if m else []
     return [answer.split(".")[0].strip()] if answer else []
 
@@ -197,8 +197,30 @@ def _load_parents_by_doc() -> dict[str, list[str]]:
     return dict(by_doc)
 
 
+_MONTH_NAMES = {
+    "01": "JANUARY", "02": "FEBRUARY", "03": "MARCH", "04": "APRIL",
+    "05": "MAY", "06": "JUNE", "07": "JULY", "08": "AUGUST",
+    "09": "SEPTEMBER", "10": "OCTOBER", "11": "NOVEMBER", "12": "DECEMBER",
+}
+
+def _text_contains_date(text: str, iso_date: str) -> bool:
+    """Check if an ISO date (2014-05-20) appears in text in any common format."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", iso_date)
+    if not m:
+        return False
+    year, month, day = m.group(1), m.group(2), m.group(3)
+    day_no_zero = str(int(day))
+    month_name = _MONTH_NAMES.get(month, "")
+    text_upper = text.upper()
+    if year not in text_upper:
+        return False
+    return month_name in text_upper or f"/{month}/" in text or f"-{month}-" in text
+
+
 def _text_contains_value(text: str, value: str) -> bool:
     """Check if any token window in text fuzzy-matches the value."""
+    if re.match(r"\d{4}-\d{2}-\d{2}", value):
+        return _text_contains_date(text, value)
     val_tokens = _tokenize(value)
     if not val_tokens:
         return False
@@ -225,7 +247,16 @@ def _pairwise_judge(question: str, rag_answer: str, reference: str) -> tuple[str
     a, b = (reference, rag_answer) if swapped else (rag_answer, reference)
     prompt = JUDGE_PROMPT.format(question=question, answer_a=a, answer_b=b)
     try:
-        reasoning = _judge_llm().invoke([HumanMessage(content=prompt)]).content.strip()
+        import signal
+        def _timeout_handler(signum, frame):
+            raise TimeoutError("Judge call timed out")
+        old = signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(60)
+        try:
+            reasoning = _judge_llm().invoke([HumanMessage(content=prompt)]).content.strip()
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
     except Exception as e:
         print(f"    judge error: {e}")
         return "error", str(e)
@@ -289,7 +320,16 @@ def _llm_metrics(samples: list[dict]) -> list[dict]:
                 kw = {"question": s["query"], "answer": s["answer"][:500]}
                 if "context" in prompt_tpl:
                     kw["context"] = ctx[:2000]
-                resp = _judge_llm().invoke([HumanMessage(content=prompt_tpl.format(**kw))]).content
+                import signal
+                def _timeout_handler(signum, frame):
+                    raise TimeoutError("LLM call timed out")
+                old = signal.signal(signal.SIGALRM, _timeout_handler)
+                signal.alarm(60)
+                try:
+                    resp = _judge_llm().invoke([HumanMessage(content=prompt_tpl.format(**kw))]).content
+                finally:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old)
                 m = re.search(r'"score"\s*:\s*([\d.]+)', resp)
                 row[name] = float(m.group(1)) if m else None
             except Exception:

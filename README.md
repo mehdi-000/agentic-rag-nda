@@ -276,22 +276,22 @@ For each question, the diagnostic traces where a failure happened:
 | **Relevancy** | LLM-scored: does the answer address the question? |
 | **Judge** | Pairwise blind comparison: RAG answer vs. reference, randomised order |
 
-### Scores (10 documents, 32 questions)
+### Scores (30 documents, 94 questions)
 
 ```
 Field                  F1   HitR  Faith  Relev        Judge    N
 ----------------------------------------------------------------------------
-effective_date      0.667  0.000  0.980  0.980 6/         9    9
-jurisdiction        0.889  1.000  0.875  1.000 6/         9    9
-party               0.713  0.900  0.800  0.386 5/        10   10
-term                0.000  0.500  1.000  0.950 1/         4    4
+effective_date      0.571  0.857  0.946  0.950 12/        21   21
+jurisdiction        0.786  0.893  0.821  0.974 22/        28   28
+party               0.553  0.933  0.865  0.510 16/        30   30
+term                0.600  0.600  0.889  0.956  9/        15   15
 ----------------------------------------------------------------------------
-Overall             0.660
+Overall             0.634
 
-Diagnosis: INGESTION 9, OK 12, GENERATION 7, RETRIEVAL 3, HALLUCINATION 1
+Diagnosis: OK 50, GENERATION 14, RETRIEVAL 16, INGESTION 13, HALLUCINATION 1
 ```
 
-Jurisdiction is the strongest field (F1 0.89, 100% retrieval hit rate). Party extraction works well when the names appear as expected in the document (F1 0.71). Term extraction is the weakest. The system finds the relevant clause but does not consistently parse the duration from it.
+Jurisdiction is the strongest field (F1 0.79, 89% retrieval hit rate). Party extraction works when names appear as expected (F1 0.55), but the 7B model sometimes misses secondary parties. Term extraction improved from 0.0 to 0.6 after fixing value parsing. Effective dates land at F1 0.57 with most failures in retrieval, not ingestion.
 
 ### Judge
 
